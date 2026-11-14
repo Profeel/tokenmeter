@@ -7,13 +7,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var refreshTimer: Timer?
+    private var probeTickCount = 0
     private let viewModel = DashboardViewModel()
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        NotificationManager.shared.configureAndRequestPermission()
+        LaunchAtLoginManager.shared.refreshStatus()
+
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 400, height: 560)
+        popover.contentSize = NSSize(width: 400, height: 580)
         popover.behavior = .transient
 
         let contentView = DashboardView(viewModel: viewModel, onQuit: {
@@ -37,8 +41,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.viewModel.refreshUsage()
-                self?.viewModel.refreshQuotas()
+                guard let self else { return }
+                self.probeTickCount += 1
+                self.viewModel.refreshUsage()
+                self.viewModel.refreshQuotas()
+                if self.probeTickCount % 2 == 0 {
+                    self.viewModel.refreshProbes()
+                }
             }
         }
     }
@@ -76,6 +85,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
+        menu.addItem(NSMenuItem.separator())
+
+        LaunchAtLoginManager.shared.refreshStatus()
+        let launchItem = NSMenuItem(title: "开机自动启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchItem.target = self
+        launchItem.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
+        menu.addItem(launchItem)
+
+        let notifyItem = NSMenuItem(title: "额度预警与 429 通知", action: #selector(toggleNotifications), keyEquivalent: "")
+        notifyItem.target = self
+        notifyItem.state = viewModel.notificationsEnabled ? .on : .off
+        menu.addItem(notifyItem)
+
+        let testNotifyItem = NSMenuItem(title: "发送测试通知", action: #selector(sendTestNotification), keyEquivalent: "")
+        testNotifyItem.target = self
+        menu.addItem(testNotifyItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         let openCfg = NSMenuItem(title: "打开配置文件 (~/.tokenmeter)", action: #selector(openConfigFolder), keyEquivalent: ",")
         openCfg.target = self
         menu.addItem(openCfg)
@@ -88,6 +116,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        LaunchAtLoginManager.shared.toggle()
+        if LaunchAtLoginManager.shared.requiresApproval {
+            LaunchAtLoginManager.shared.openSystemLoginItemsSettings()
+        }
+    }
+
+    @objc private func toggleNotifications() {
+        viewModel.toggleNotifications()
+    }
+
+    @objc private func sendTestNotification() {
+        NotificationManager.shared.configureAndRequestPermission()
+        NotificationManager.shared.sendTestNotification()
     }
 
     @objc private func contextRefresh() {

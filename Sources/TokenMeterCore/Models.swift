@@ -451,6 +451,8 @@ public struct BalanceAccountConfig: Codable, Sendable {
 public struct TokenMeterConfig: Codable, Sendable {
     public var dailyBudgetUSD: Double
     public var budgetAlertRatio: Double
+    public var quotaAlertPercent: Double
+    public var enableNotifications: Bool
     public var refreshIntervalSeconds: Int
     public var probeIntervalSeconds: Int
     public var gatewayQuotaURLs: [String]
@@ -462,6 +464,8 @@ public struct TokenMeterConfig: Codable, Sendable {
     public init(
         dailyBudgetUSD: Double = 20.0,
         budgetAlertRatio: Double = 0.8,
+        quotaAlertPercent: Double = 85.0,
+        enableNotifications: Bool = true,
         refreshIntervalSeconds: Int = 30,
         probeIntervalSeconds: Int = 60,
         gatewayQuotaURLs: [String] = ["http://127.0.0.1:3425/v1/magpie/quotas"],
@@ -472,6 +476,8 @@ public struct TokenMeterConfig: Codable, Sendable {
     ) {
         self.dailyBudgetUSD = dailyBudgetUSD
         self.budgetAlertRatio = budgetAlertRatio
+        self.quotaAlertPercent = quotaAlertPercent
+        self.enableNotifications = enableNotifications
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.probeIntervalSeconds = probeIntervalSeconds
         self.gatewayQuotaURLs = gatewayQuotaURLs
@@ -482,7 +488,8 @@ public struct TokenMeterConfig: Codable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case dailyBudgetUSD, budgetAlertRatio, refreshIntervalSeconds, probeIntervalSeconds
+        case dailyBudgetUSD, budgetAlertRatio, quotaAlertPercent, enableNotifications
+        case refreshIntervalSeconds, probeIntervalSeconds
         case gatewayQuotaURLs, customEndpoints, oneAPIAccounts, balanceAccounts, modelPriceOverrides
     }
 
@@ -490,6 +497,8 @@ public struct TokenMeterConfig: Codable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         dailyBudgetUSD = try c.decodeIfPresent(Double.self, forKey: .dailyBudgetUSD) ?? 20.0
         budgetAlertRatio = try c.decodeIfPresent(Double.self, forKey: .budgetAlertRatio) ?? 0.8
+        quotaAlertPercent = try c.decodeIfPresent(Double.self, forKey: .quotaAlertPercent) ?? 85.0
+        enableNotifications = try c.decodeIfPresent(Bool.self, forKey: .enableNotifications) ?? true
         refreshIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalSeconds) ?? 30
         probeIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .probeIntervalSeconds) ?? 60
         gatewayQuotaURLs = try c.decodeIfPresent([String].self, forKey: .gatewayQuotaURLs) ?? ["http://127.0.0.1:3425/v1/magpie/quotas"]

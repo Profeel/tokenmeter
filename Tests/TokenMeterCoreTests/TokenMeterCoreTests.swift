@@ -155,6 +155,38 @@ final class TokenMeterCoreTests: XCTestCase {
         XCTAssertEqual(parsed[1].windows[1].usedPercent, 52.7, accuracy: 0.01)
     }
 
+    func testAlertEvaluatorFiresThresholdResetAnd429WithDeduplication() {
+        let evaluator = AlertEvaluator()
+        let cfg = TokenMeterConfig(dailyBudgetUSD: 20, budgetAlertRatio: 0.8, quotaAlertPercent: 85, enableNotifications: true)
+        let t0 = Date()
+
+        // Baseline run: quota already at 50%, healthy endpoint
+        let q0 = [SubscriptionQuota(provider: "codex", name: "Codex", kind: .subscription, windows: [QuotaWindow(name: "7 days", usedPercent: 50)], source: "gateway")]
+        let ep = DiscoveredEndpoint(name: "gw", baseURL: "http://127.0.0.1:3425/v1", source: "hermes", kind: .openAI)
+        let p0 = [EndpointProbeResult(endpoint: ep, status: .healthy, httpStatusCode: 200, latencyMs: 12)]
+        XCTAssertTrue(evaluator.evaluate(todaySnapshot: nil, quotas: q0, probes: p0, config: cfg, now: t0).isEmpty)
+
+        // Crosses 85% and hits 429
+        let q1 = [SubscriptionQuota(provider: "codex", name: "Codex", kind: .subscription, windows: [QuotaWindow(name: "7 days", usedPercent: 88)], source: "gateway")]
+        let p1 = [EndpointProbeResult(endpoint: ep, status: .rateLimited, httpStatusCode: 429, latencyMs: 25)]
+        let alerts1 = evaluator.evaluate(todaySnapshot: nil, quotas: q1, probes: p1, config: cfg, now: t0.addingTimeInterval(60))
+        XCTAssertEqual(alerts1.count, 2)
+
+        // Repeated check should not re-fire
+        let alerts2 = evaluator.evaluate(todaySnapshot: nil, quotas: q1, probes: p1, config: cfg, now: t0.addingTimeInterval(120))
+        XCTAssertTrue(alerts2.isEmpty)
+
+        // Exhausts to 99%, then resets back to 5% -> fires exhaust then reset recovery
+        let q2 = [SubscriptionQuota(provider: "codex", name: "Codex", kind: .subscription, windows: [QuotaWindow(name: "7 days", usedPercent: 99)], source: "gateway")]
+        let alerts3 = evaluator.evaluate(todaySnapshot: nil, quotas: q2, probes: p0, config: cfg, now: t0.addingTimeInterval(180))
+        XCTAssertTrue(alerts3.contains(where: { $0.id.hasPrefix("quota-exhausted-") }))
+        XCTAssertTrue(alerts3.contains(where: { $0.id.hasPrefix("probe-recover-") }))
+
+        let q3 = [SubscriptionQuota(provider: "codex", name: "Codex", kind: .subscription, windows: [QuotaWindow(name: "7 days", usedPercent: 5)], source: "gateway")]
+        let alerts4 = evaluator.evaluate(todaySnapshot: nil, quotas: q3, probes: p0, config: cfg, now: t0.addingTimeInterval(240))
+        XCTAssertTrue(alerts4.contains(where: { $0.id.hasPrefix("quota-reset-") }))
+    }
+
     private func executeSQL(at path: String, sql: String) throws {
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)

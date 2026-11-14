@@ -10,6 +10,7 @@ public final class DashboardViewModel: ObservableObject {
     @Published public var isRefreshingUsage: Bool = false
     @Published public var isProbing: Bool = false
     @Published public var isRefreshingQuotas: Bool = false
+    @Published public var notificationsEnabled: Bool
     @Published public var selectedTab: Int = 0 // 0 = 订阅/余额, 1 = Agent, 2 = 模型, 3 = 端点
 
     public var onMenuTitleChange: ((String) -> Void)?
@@ -18,9 +19,12 @@ public final class DashboardViewModel: ObservableObject {
     private let discovery = EndpointDiscovery()
     private let prober = EndpointProber()
     private let quotaTracker = QuotaTracker()
+    private let alertEvaluator = AlertEvaluator()
+    private var latestTodaySnapshot: MeterSnapshot?
 
     public init() {
         let cfg = TokenMeterConfig.load()
+        self.notificationsEnabled = cfg.enableNotifications
         self.snapshot = MeterSnapshot(
             window: .today,
             generatedAt: Date(),
@@ -32,6 +36,16 @@ public final class DashboardViewModel: ObservableObject {
             dailyBudgetUSD: cfg.dailyBudgetUSD,
             budgetAlertRatio: cfg.budgetAlertRatio
         )
+    }
+
+    public func toggleNotifications() {
+        var cfg = TokenMeterConfig.load()
+        cfg.enableNotifications.toggle()
+        cfg.save()
+        notificationsEnabled = cfg.enableNotifications
+        if notificationsEnabled {
+            NotificationManager.shared.configureAndRequestPermission()
+        }
     }
 
     public func switchWindow(_ window: TimeWindow) {
@@ -57,6 +71,7 @@ public final class DashboardViewModel: ObservableObject {
                 self.quotas = results
                 self.isRefreshingQuotas = false
                 self.updateMenuTitle(todaySnap: nil)
+                self.evaluateAlerts(config: cfg)
             }
         }
     }
@@ -73,8 +88,10 @@ public final class DashboardViewModel: ObservableObject {
             let todaySnap = window == .today ? snap : eng.buildSnapshot(window: .today, config: cfg)
             await MainActor.run {
                 self.snapshot = snap
+                self.latestTodaySnapshot = todaySnap
                 self.isRefreshingUsage = false
                 self.updateMenuTitle(todaySnap: todaySnap)
+                self.evaluateAlerts(config: cfg)
             }
         }
     }
@@ -92,7 +109,20 @@ public final class DashboardViewModel: ObservableObject {
                 self.probes = results
                 self.isProbing = false
                 self.updateMenuTitle(todaySnap: nil)
+                self.evaluateAlerts(config: cfg)
             }
+        }
+    }
+
+    private func evaluateAlerts(config: TokenMeterConfig) {
+        let alerts = alertEvaluator.evaluate(
+            todaySnapshot: latestTodaySnapshot,
+            quotas: quotas,
+            probes: probes,
+            config: config
+        )
+        for alert in alerts {
+            NotificationManager.shared.send(alert: alert)
         }
     }
 
@@ -109,6 +139,7 @@ public final class DashboardViewModel: ObservableObject {
 
 public struct DashboardView: View {
     @ObservedObject var viewModel: DashboardViewModel
+    @ObservedObject private var launchManager = LaunchAtLoginManager.shared
     var onQuit: () -> Void
 
     public var body: some View {
@@ -136,7 +167,7 @@ public struct DashboardView: View {
             footerView
         }
         .padding(14)
-        .frame(width: 400, height: 560)
+        .frame(width: 400, height: 580)
     }
 
     private var headerView: some View {
@@ -541,30 +572,72 @@ public struct DashboardView: View {
     }
 
     private var footerView: some View {
-        HStack {
-            Text("更新于 \(Formatters.relativeTime(viewModel.snapshot.generatedAt))")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-            Spacer()
-            Button("配置") {
-                let cfg = TokenMeterConfig.load()
-                if !FileManager.default.fileExists(atPath: TokenMeterConfig.configFileURL.path) {
-                    cfg.save()
+        VStack(spacing: 6) {
+            HStack(spacing: 10) {
+                Toggle(isOn: Binding(
+                    get: { launchManager.isEnabled },
+                    set: { enabled in
+                        launchManager.setEnabled(enabled)
+                        if launchManager.requiresApproval {
+                            launchManager.openSystemLoginItemsSettings()
+                        }
+                    }
+                )) {
+                    Text("开机自启")
+                        .font(.system(size: 10.5))
                 }
-                NSWorkspace.shared.open(TokenMeterConfig.configDirectoryURL)
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 11))
-            .foregroundColor(.secondary)
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
 
-            Text("·").foregroundColor(.secondary)
+                Toggle(isOn: Binding(
+                    get: { viewModel.notificationsEnabled },
+                    set: { _ in viewModel.toggleNotifications() }
+                )) {
+                    Text("预警通知")
+                        .font(.system(size: 10.5))
+                }
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
 
-            Button("退出") {
-                onQuit()
+                Spacer()
+
+                Button {
+                    NotificationManager.shared.configureAndRequestPermission()
+                    NotificationManager.shared.sendTestNotification()
+                } label: {
+                    Image(systemName: "bell.badge")
+                        .font(.system(size: 10.5))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("发送测试系统通知")
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 11))
-            .foregroundColor(.secondary)
+
+            HStack {
+                Text("更新于 \(Formatters.relativeTime(viewModel.snapshot.generatedAt))")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("配置") {
+                    let cfg = TokenMeterConfig.load()
+                    if !FileManager.default.fileExists(atPath: TokenMeterConfig.configFileURL.path) {
+                        cfg.save()
+                    }
+                    NSWorkspace.shared.open(TokenMeterConfig.configDirectoryURL)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+
+                Text("·").foregroundColor(.secondary)
+
+                Button("退出") {
+                    onQuit()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            }
         }
     }
 }
