@@ -117,6 +117,44 @@ final class TokenMeterCoreTests: XCTestCase {
         XCTAssertEqual(snap.totalUsage.totalTokens, 2_210_000)
     }
 
+    func testQuotaTrackerParsesMultiSubscriptionWindows() {
+        let json = """
+        {
+          "data": [
+            {
+              "provider": "codex",
+              "name": "Codex",
+              "kind": "subscription",
+              "plan": "prolite",
+              "user": "dev@example.com",
+              "windows": [
+                {"name": "7 days", "used": 33, "remaining": 67, "resetsAt": "2026-11-20T08:59:09+08:00"}
+              ]
+            },
+            {
+              "provider": "opendesign",
+              "name": "Open Design",
+              "kind": "subscription",
+              "plan": "Design Plan Go",
+              "user": "dev@example.com",
+              "balance": "$1.00",
+              "windows": [
+                {"name": "5 hours", "used": 0, "remaining": 100, "display": "0 / 50k credits"},
+                {"name": "7 days", "used": 52.7, "remaining": 47.3, "display": "79k / 150k credits"}
+              ]
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let parsed = QuotaTracker().parseGatewayQuotasJSON(data: json)
+        XCTAssertEqual(parsed.count, 2)
+        XCTAssertEqual(parsed[0].windows.first?.usedPercent ?? 0, 33, accuracy: 0.01)
+        XCTAssertEqual(parsed[1].balanceText, "$1.00")
+        XCTAssertEqual(parsed[1].windows.count, 2)
+        XCTAssertEqual(parsed[1].windows[1].usedPercent, 52.7, accuracy: 0.01)
+    }
+
     private func executeSQL(at path: String, sql: String) throws {
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(path, &db), SQLITE_OK)

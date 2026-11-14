@@ -38,6 +38,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.viewModel.refreshUsage()
+                self?.viewModel.refreshQuotas()
             }
         }
     }
@@ -52,6 +53,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 popover.performClose(sender)
             } else {
                 viewModel.refreshUsage()
+                viewModel.refreshQuotas()
                 popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
                 popover.contentViewController?.view.window?.makeKey()
             }

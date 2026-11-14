@@ -63,4 +63,19 @@ public enum Formatters {
         if diff < 86400 { return "\(diff / 3600)小时前" }
         return "\(diff / 86400)天前"
     }
+
+    public static func resetCountdown(_ date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "" }
+        let diff = Int(date.timeIntervalSince(now))
+        if diff <= 0 { return "即将重置" }
+        if diff < 3600 { return "\(max(1, diff / 60))分钟后重置" }
+        if diff < 86400 {
+            let h = diff / 3600
+            let m = (diff % 3600) / 60
+            return m > 0 ? "\(h)小时\(m)分后重置" : "\(h)小时后重置"
+        }
+        let d = diff / 86400
+        let h = (diff % 86400) / 3600
+        return h > 0 ? "\(d)天\(h)小时后重置" : "\(d)天后重置"
+    }
 }

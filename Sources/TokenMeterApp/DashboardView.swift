@@ -5,16 +5,19 @@ import TokenMeterCore
 public final class DashboardViewModel: ObservableObject {
     @Published public var selectedWindow: TimeWindow = .today
     @Published public var snapshot: MeterSnapshot
+    @Published public var quotas: [SubscriptionQuota] = []
     @Published public var probes: [EndpointProbeResult] = []
     @Published public var isRefreshingUsage: Bool = false
     @Published public var isProbing: Bool = false
-    @Published public var selectedTab: Int = 0 // 0 = 概览, 1 = 模型, 2 = 端点
+    @Published public var isRefreshingQuotas: Bool = false
+    @Published public var selectedTab: Int = 0 // 0 = 订阅/余额, 1 = Agent, 2 = 模型, 3 = 端点
 
     public var onMenuTitleChange: ((String) -> Void)?
 
     private let engine = TokenMeterEngine()
     private let discovery = EndpointDiscovery()
     private let prober = EndpointProber()
+    private let quotaTracker = QuotaTracker()
 
     public init() {
         let cfg = TokenMeterConfig.load()
@@ -38,7 +41,24 @@ public final class DashboardViewModel: ObservableObject {
 
     public func refreshAll() {
         refreshUsage()
+        refreshQuotas()
         refreshProbes()
+    }
+
+    public func refreshQuotas() {
+        guard !isRefreshingQuotas else { return }
+        isRefreshingQuotas = true
+        let cfg = TokenMeterConfig.load()
+        let qt = quotaTracker
+
+        Task.detached(priority: .userInitiated) {
+            let results = await qt.fetchAll(config: cfg)
+            await MainActor.run {
+                self.quotas = results
+                self.isRefreshingQuotas = false
+                self.updateMenuTitle(todaySnap: nil)
+            }
+        }
     }
 
     public func refreshUsage() {
@@ -101,8 +121,10 @@ public struct DashboardView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 10) {
                     if viewModel.selectedTab == 0 {
-                        overviewSection
+                        quotasSection
                     } else if viewModel.selectedTab == 1 {
+                        overviewSection
+                    } else if viewModel.selectedTab == 2 {
                         modelsSection
                     } else {
                         endpointsSection
@@ -227,11 +249,100 @@ public struct DashboardView: View {
 
     private var tabSelector: some View {
         Picker("视图", selection: $viewModel.selectedTab) {
-            Text("Agent (\(viewModel.snapshot.agentBreakdowns.count))").tag(0)
-            Text("模型 (\(viewModel.snapshot.modelBreakdowns.count))").tag(1)
-            Text("端点 (\(viewModel.probes.count))").tag(2)
+            Text("订阅 (\(viewModel.quotas.count))").tag(0)
+            Text("Agent (\(viewModel.snapshot.agentBreakdowns.count))").tag(1)
+            Text("模型 (\(viewModel.snapshot.modelBreakdowns.count))").tag(2)
+            Text("端点 (\(viewModel.probes.count))").tag(3)
         }
         .pickerStyle(.segmented)
+    }
+
+    private var quotasSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("各订阅用量比例与账户余额")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button(viewModel.isRefreshingQuotas ? "查询中…" : "刷新余额") {
+                    viewModel.refreshQuotas()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(viewModel.isRefreshingQuotas)
+            }
+
+            if viewModel.quotas.isEmpty {
+                emptyState(viewModel.isRefreshingQuotas ? "正在查询订阅与余额..." : "暂未检测到订阅或余额配置，点击下方「配置」添加")
+            } else {
+                ForEach(viewModel.quotas) { q in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Text(q.name)
+                                .font(.system(size: 12.5, weight: .bold))
+                            if let plan = q.plan, !plan.isEmpty {
+                                Text(plan)
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.14))
+                                    .foregroundColor(.orange)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                            Spacer()
+                            if let bal = q.balanceText, !bal.isEmpty {
+                                Text(bal)
+                                    .font(.system(size: 11.5, weight: .bold))
+                                    .foregroundColor(.green)
+                                    .monospacedDigit()
+                            }
+                        }
+
+                        if let acct = q.accountLabel, !acct.isEmpty {
+                            Text(acct)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        ForEach(q.windows) { w in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(w.name)
+                                        .font(.system(size: 10.5, weight: .medium))
+                                    Spacer()
+                                    if let disp = w.display, !disp.isEmpty {
+                                        Text("\(disp) · ")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Text(String(format: "%.0f%% 已用", w.usedPercent))
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .foregroundColor(quotaColor(w.usedPercent))
+                                        .monospacedDigit()
+                                }
+                                ProgressView(value: min(1.0, max(0.0, w.usedPercent / 100.0)))
+                                    .tint(quotaColor(w.usedPercent))
+                                if let rst = w.resetsAt {
+                                    Text(Formatters.resetCountdown(rst))
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        }
+    }
+
+    private func quotaColor(_ usedPercent: Double) -> Color {
+        if usedPercent >= 90 { return .red }
+        if usedPercent >= 65 { return .orange }
+        return .green
     }
 
     private var overviewSection: some View {

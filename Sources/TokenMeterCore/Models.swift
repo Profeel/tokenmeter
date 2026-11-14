@@ -346,13 +346,117 @@ public struct OneAPIConfig: Codable, Sendable {
     }
 }
 
+public enum QuotaKind: String, Codable, Sendable {
+    case subscription = "subscription"
+    case apiBalance = "api_balance"
+    case rateLimit = "rate_limit"
+}
+
+public struct QuotaWindow: Codable, Sendable, Identifiable {
+    public var id: String { name }
+    public var name: String
+    public var usedPercent: Double
+    public var remainingPercent: Double
+    public var resetsAt: Date?
+    public var display: String?
+    public var unit: String?
+
+    public init(
+        name: String,
+        usedPercent: Double,
+        remainingPercent: Double? = nil,
+        resetsAt: Date? = nil,
+        display: String? = nil,
+        unit: String? = nil
+    ) {
+        self.name = name
+        self.usedPercent = min(100, max(0, usedPercent))
+        self.remainingPercent = min(100, max(0, remainingPercent ?? (100.0 - usedPercent)))
+        self.resetsAt = resetsAt
+        self.display = display
+        self.unit = unit
+    }
+}
+
+public struct SubscriptionQuota: Codable, Sendable, Identifiable {
+    public var id: String { "\(source)::\(provider)::\(accountLabel ?? "default")" }
+    public var provider: String
+    public var name: String
+    public var kind: QuotaKind
+    public var plan: String?
+    public var accountLabel: String?
+    public var balanceText: String?
+    public var usedUSD: Double?
+    public var remainingUSD: Double?
+    public var windows: [QuotaWindow]
+    public var source: String
+    public var updatedAt: Date
+
+    public init(
+        provider: String,
+        name: String,
+        kind: QuotaKind,
+        plan: String? = nil,
+        accountLabel: String? = nil,
+        balanceText: String? = nil,
+        usedUSD: Double? = nil,
+        remainingUSD: Double? = nil,
+        windows: [QuotaWindow] = [],
+        source: String,
+        updatedAt: Date = Date()
+    ) {
+        self.provider = provider
+        self.name = name
+        self.kind = kind
+        self.plan = plan
+        self.accountLabel = accountLabel
+        self.balanceText = balanceText
+        self.usedUSD = usedUSD
+        self.remainingUSD = remainingUSD
+        self.windows = windows
+        self.source = source
+        self.updatedAt = updatedAt
+    }
+
+    public var maxUsedPercent: Double {
+        windows.map(\.usedPercent).max() ?? 0
+    }
+}
+
+public enum BalanceVendor: String, Codable, CaseIterable, Sendable {
+    case oneAPI = "oneapi"
+    case newAPI = "newapi"
+    case deepSeek = "deepseek"
+    case openRouter = "openrouter"
+    case moonshot = "moonshot"
+    case siliconFlow = "siliconflow"
+}
+
+public struct BalanceAccountConfig: Codable, Sendable {
+    public var vendor: BalanceVendor
+    public var name: String
+    public var baseURL: String?
+    public var apiKey: String
+    public var userId: Int?
+
+    public init(vendor: BalanceVendor, name: String, baseURL: String? = nil, apiKey: String, userId: Int? = nil) {
+        self.vendor = vendor
+        self.name = name
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+        self.userId = userId
+    }
+}
+
 public struct TokenMeterConfig: Codable, Sendable {
     public var dailyBudgetUSD: Double
     public var budgetAlertRatio: Double
     public var refreshIntervalSeconds: Int
     public var probeIntervalSeconds: Int
+    public var gatewayQuotaURLs: [String]
     public var customEndpoints: [DiscoveredEndpoint]
     public var oneAPIAccounts: [OneAPIConfig]
+    public var balanceAccounts: [BalanceAccountConfig]
     public var modelPriceOverrides: [String: ModelPrice]
 
     public init(
@@ -360,17 +464,39 @@ public struct TokenMeterConfig: Codable, Sendable {
         budgetAlertRatio: Double = 0.8,
         refreshIntervalSeconds: Int = 30,
         probeIntervalSeconds: Int = 60,
+        gatewayQuotaURLs: [String] = ["http://127.0.0.1:3425/v1/magpie/quotas"],
         customEndpoints: [DiscoveredEndpoint] = [],
         oneAPIAccounts: [OneAPIConfig] = [],
+        balanceAccounts: [BalanceAccountConfig] = [],
         modelPriceOverrides: [String: ModelPrice] = [:]
     ) {
         self.dailyBudgetUSD = dailyBudgetUSD
         self.budgetAlertRatio = budgetAlertRatio
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.probeIntervalSeconds = probeIntervalSeconds
+        self.gatewayQuotaURLs = gatewayQuotaURLs
         self.customEndpoints = customEndpoints
         self.oneAPIAccounts = oneAPIAccounts
+        self.balanceAccounts = balanceAccounts
         self.modelPriceOverrides = modelPriceOverrides
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case dailyBudgetUSD, budgetAlertRatio, refreshIntervalSeconds, probeIntervalSeconds
+        case gatewayQuotaURLs, customEndpoints, oneAPIAccounts, balanceAccounts, modelPriceOverrides
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dailyBudgetUSD = try c.decodeIfPresent(Double.self, forKey: .dailyBudgetUSD) ?? 20.0
+        budgetAlertRatio = try c.decodeIfPresent(Double.self, forKey: .budgetAlertRatio) ?? 0.8
+        refreshIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalSeconds) ?? 30
+        probeIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .probeIntervalSeconds) ?? 60
+        gatewayQuotaURLs = try c.decodeIfPresent([String].self, forKey: .gatewayQuotaURLs) ?? ["http://127.0.0.1:3425/v1/magpie/quotas"]
+        customEndpoints = try c.decodeIfPresent([DiscoveredEndpoint].self, forKey: .customEndpoints) ?? []
+        oneAPIAccounts = try c.decodeIfPresent([OneAPIConfig].self, forKey: .oneAPIAccounts) ?? []
+        balanceAccounts = try c.decodeIfPresent([BalanceAccountConfig].self, forKey: .balanceAccounts) ?? []
+        modelPriceOverrides = try c.decodeIfPresent([String: ModelPrice].self, forKey: .modelPriceOverrides) ?? [:]
     }
 
     public static var configDirectoryURL: URL {

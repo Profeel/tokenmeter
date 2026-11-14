@@ -76,10 +76,25 @@ struct TokenMeterCLI {
                 print("")
             }
 
+        case "quotas", "quota", "balance", "balances":
+            let quotas = await QuotaTracker().fetchAll(config: config)
+            if jsonMode {
+                printJSON(quotas)
+            } else {
+                printQuotas(quotas)
+            }
+
         case "init-config":
             if !FileManager.default.fileExists(atPath: TokenMeterConfig.configFileURL.path) {
-                config.save()
-                print("✓ 已生成默认配置: \(TokenMeterConfig.configFileURL.path)")
+                var sample = config
+                if sample.balanceAccounts.isEmpty {
+                    sample.balanceAccounts = [
+                        BalanceAccountConfig(vendor: .deepSeek, name: "DeepSeek", apiKey: "sk-your-deepseek-key"),
+                        BalanceAccountConfig(vendor: .oneAPI, name: "OneAPI 主站", baseURL: "https://your-oneapi.example.com", apiKey: "your-system-token", userId: 1)
+                    ]
+                }
+                sample.save()
+                print("✓ 已生成示例配置: \(TokenMeterConfig.configFileURL.path)")
             } else {
                 print("配置文件已存在: \(TokenMeterConfig.configFileURL.path)")
             }
@@ -108,17 +123,21 @@ struct TokenMeterCLI {
     ) async {
         let snap = engine.buildSnapshot(window: window, config: config)
         var probes: [EndpointProbeResult] = []
+        var quotas: [SubscriptionQuota] = []
         if includeProbe {
-            let eps = EndpointDiscovery().discover(config: config)
-            probes = await EndpointProber().probeAll(endpoints: eps, config: config)
+            async let pTask = EndpointProber().probeAll(endpoints: EndpointDiscovery().discover(config: config), config: config)
+            async let qTask = QuotaTracker().fetchAll(config: config)
+            probes = await pTask
+            quotas = await qTask
         }
 
         if jsonMode {
             struct CombinedReport: Codable {
                 let snapshot: MeterSnapshot
+                let quotas: [SubscriptionQuota]
                 let endpoints: [EndpointProbeResult]
             }
-            printJSON(CombinedReport(snapshot: snap, endpoints: probes))
+            printJSON(CombinedReport(snapshot: snap, quotas: quotas, endpoints: probes))
             return
         }
 
@@ -151,6 +170,10 @@ struct TokenMeterCLI {
             }
         }
 
+        if !quotas.isEmpty {
+            printQuotas(quotas, embedded: true)
+        }
+
         if !probes.isEmpty {
             print("\n  [上游端点探针]")
             for p in probes {
@@ -164,6 +187,40 @@ struct TokenMeterCLI {
             }
         }
         print("")
+    }
+
+    static func printQuotas(_ quotas: [SubscriptionQuota], embedded: Bool = false) {
+        if !embedded {
+            print("\n💳 TokenMeter 订阅用量与账户余额 (\(quotas.count))")
+            print(String(repeating: "═", count: 72))
+        } else {
+            print("\n  [订阅用量与账户余额]")
+        }
+        if quotas.isEmpty {
+            print("  (未检测到订阅或余额配置，可运行 `tokenmeter init-config` 添加 API 余额查询)")
+        } else {
+            for q in quotas {
+                let planPart = q.plan.map { " [\($0)]" } ?? ""
+                let acctPart = q.accountLabel.map { " (\($0))" } ?? ""
+                let balPart = q.balanceText.map { "  💰 \($0)" } ?? ""
+                print("    ▸ \(q.name)\(planPart)\(acctPart)\(balPart)")
+                for w in q.windows {
+                    let bar = progressBar(percent: w.usedPercent, width: 16)
+                    let pctStr = String(format: "已用%5.1f%% (剩%5.1f%%)", w.usedPercent, w.remainingPercent)
+                    let disp = w.display.map { " [\($0)]" } ?? ""
+                    let rst = w.resetsAt.map { " · \(Formatters.resetCountdown($0))" } ?? ""
+                    print("        \(w.name.padding(toLength: 18, withPad: " ", startingAt: 0)) \(bar) \(pctStr)\(disp)\(rst)")
+                }
+            }
+        }
+        if !embedded { print("") }
+    }
+
+    static func progressBar(percent: Double, width: Int) -> String {
+        let clamped = min(100, max(0, percent))
+        let filled = Int((clamped / 100.0 * Double(width)).rounded())
+        let empty = max(0, width - filled)
+        return "[" + String(repeating: "█", count: filled) + String(repeating: "░", count: empty) + "]"
     }
 
     static func statusIcon(_ s: EndpointStatus) -> String {
@@ -190,7 +247,8 @@ struct TokenMeterCLI {
         TokenMeter — 跨 AI Coding Agent 本地消耗与上游端点健康监控
 
         用法:
-          tokenmeter status [--json]      查看今日消耗 + 实时上游端点探针 (默认)
+          tokenmeter status [--json]      查看今日消耗 + 订阅余额 + 上游端点探针 (默认)
+          tokenmeter quotas [--json]      查看各订阅用量比例、重置倒计时与 API 余额
           tokenmeter today  [--json]      仅看今日消耗汇总
           tokenmeter week   [--json]      最近 7 天消耗汇总
           tokenmeter month  [--json]      最近 30 天消耗汇总

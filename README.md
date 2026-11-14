@@ -14,11 +14,13 @@
    - **Claude Code**（`~/.claude/projects/**/*.jsonl`，按 `message.id` 流式去重）
    - **Pi Agent**（`~/.pi/**/*.jsonl`）
    - **OpenCode**（`~/.local/share/opencode/opencode.db`）
-2. **上游网关 & 本地模型健康探针**
+2. **多订阅用量比例 & 账户余额自动查询**
+   - 自动发现本地网关订阅窗口（Codex、Antigravity / Google AI Pro、Open Design、WorkBuddy 等），精确展示 `5h / 7d / Credits` **已用比例、剩余比例、具体额度（如 `79k / 150k credits`）、美元余额与重置倒计时**
+   - 原生直连查询多厂商 API 余额：**OneAPI / NewAPI**、**DeepSeek**、**OpenRouter**、**Moonshot (Kimi)**、**SiliconFlow (硅基流动)**，以及 Codex 原生会话 `rate_limits`
+3. **上游网关 & 本地模型健康探针**
    - 自动发现本机配置的网关与本地端点（OneAPI、NewAPI、本地代理端口、MTPLX、Ollama 等，**绝不读取或暴露 API Key**）
    - 实时监测 HTTP 状态、响应延迟（ms）、模型数量与 **429 限流告警**
-   - 可选配置 OneAPI / NewAPI 账单 Token（`~/.tokenmeter/config.json`），直接在菜单栏显示剩余美元额度
-3. **双形态原生体验**
+4. **双形态原生体验**
    - **SwiftUI 菜单栏常驻 App (`TokenMeter.app`)**：状态栏实时显示 `⚡ 2.4M · $1.82`，左键弹出今日/7天/30天看板、趋势柱状图、模型与端点明细
    - **终端 CLI (`tokenmeter`)**：支持 `--json` 输出，方便接入脚本或其他 Agent 调用
 
@@ -42,7 +44,8 @@ cd ~/tokenmeter
 - **菜单栏应用**：`open /Applications/TokenMeter.app`（或在 Spotlight 搜索 `TokenMeter`）
 - **命令行工具**：
   ```bash
-  tokenmeter status          # 今日消耗汇总 + 上游端点健康探针
+  tokenmeter status          # 今日消耗 + 订阅用量比例 + 端点探针
+  tokenmeter quotas          # 单独查看各订阅用量比例、重置倒计时与账户余额
   tokenmeter week            # 最近 7 天消耗与模型排行
   tokenmeter models 30d      # 最近 30 天 Top 模型明细
   tokenmeter probe           # 探测所有自动发现端点的延迟与 429 状态
@@ -59,11 +62,25 @@ cd ~/tokenmeter
 {
   "dailyBudgetUSD": 20.0,
   "budgetAlertRatio": 0.8,
-  "oneAPIAccounts": [
+  "gatewayQuotaURLs": [
+    "http://127.0.0.1:3425/v1/magpie/quotas"
+  ],
+  "balanceAccounts": [
     {
+      "vendor": "deepseek",
+      "name": "DeepSeek",
+      "apiKey": "sk-your-deepseek-key"
+    },
+    {
+      "vendor": "openrouter",
+      "name": "OpenRouter",
+      "apiKey": "sk-or-v1-..."
+    },
+    {
+      "vendor": "oneapi",
       "name": "OneAPI 主站",
       "baseURL": "https://ai.example.com",
-      "accessToken": "your-read-only-system-token",
+      "apiKey": "your-read-only-system-token",
       "userId": 1
     }
   ]
