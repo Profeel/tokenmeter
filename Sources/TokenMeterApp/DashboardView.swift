@@ -255,8 +255,10 @@ public struct DashboardView: View {
                             .font(.system(size: 10.5, weight: .medium))
                             .monospacedDigit()
                     }
-                    ProgressView(value: min(1.0, snap.budgetUsageRatio))
-                        .tint(snap.budgetUsageRatio >= snap.budgetAlertRatio ? .orange : .green)
+                    LinearProgressBar(
+                        progress: min(1.0, snap.budgetUsageRatio),
+                        tint: snap.budgetUsageRatio >= snap.budgetAlertRatio ? .orange : .green
+                    )
                 }
             }
         }
@@ -352,8 +354,10 @@ public struct DashboardView: View {
                                         .foregroundColor(quotaColor(w.usedPercent))
                                         .monospacedDigit()
                                 }
-                                ProgressView(value: min(1.0, max(0.0, w.usedPercent / 100.0)))
-                                    .tint(quotaColor(w.usedPercent))
+                                LinearProgressBar(
+                                    progress: min(1.0, max(0.0, w.usedPercent / 100.0)),
+                                    tint: quotaColor(w.usedPercent)
+                                )
                                 if let rst = w.resetsAt {
                                     Text(Formatters.resetCountdown(rst))
                                         .font(.system(size: 9))
@@ -375,6 +379,28 @@ public struct DashboardView: View {
         if usedPercent >= 65 { return .orange }
         return .green
     }
+}
+
+private struct LinearProgressBar: View {
+    let progress: Double
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let clamped = min(1.0, max(0.0, progress))
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.12))
+                Capsule()
+                    .fill(tint)
+                    .frame(width: max(clamped > 0 ? 4 : 0, geo.size.width * clamped))
+            }
+        }
+        .frame(height: 5)
+    }
+}
+
+extension DashboardView {
 
     private var overviewSection: some View {
         VStack(spacing: 8) {

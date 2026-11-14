@@ -6,6 +6,32 @@
 
 ---
 
+## 📸 界面与使用效果
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <strong>多订阅用量比例与重置倒计时</strong><br/><br/>
+      <img src="docs/screenshots/dashboard-quotas.png" alt="TokenMeter 订阅用量与余额面板" width="280" />
+    </td>
+    <td align="center" width="33%">
+      <strong>7 天消耗趋势与 Agent 明细</strong><br/><br/>
+      <img src="docs/screenshots/dashboard-agents.png" alt="TokenMeter Agent 消耗趋势" width="280" />
+    </td>
+    <td align="center" width="33%">
+      <strong>上游网关与本地端点延迟探针</strong><br/><br/>
+      <img src="docs/screenshots/dashboard-endpoints.png" alt="TokenMeter 端点健康探针" width="280" />
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <strong>终端 CLI 实时看板（<code>tokenmeter status</code>）</strong><br/><br/>
+  <img src="docs/screenshots/cli-usage.png" alt="TokenMeter CLI 使用效果" width="660" />
+</p>
+
+---
+
 ## ✨ 核心特性
 
 1. **跨 Agent 本地账本（100% 离线只读解析，零隐私上传）**
